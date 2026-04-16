@@ -1,0 +1,8 @@
+{
+  "name": "Pylon Field Controller",
+  "description": "A WebGPU visualization of a pylon field with Web Serial integration to control a vibration motor.",
+  "requestFramePermissions": [
+    "serial"
+  ],
+  "majorCapabilities": []
+}
