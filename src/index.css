@@ -1,5 +1,188 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap');
 @import "tailwindcss";
+
+:root {
+  --bg: #07080e;
+  --surface: #12141d;
+  --surface-light: #1c1f2b;
+  --accent: #5e6df7;
+  --accent-glow: rgba(94, 109, 247, 0.4);
+  --text-primary: #e0e2eb;
+  --text-secondary: #8e9299;
+  --mono: 'JetBrains Mono', 'Courier New', monospace;
+  --sans: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+  --border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--sans);
+  overflow: hidden;
+}
+
+.app-container {
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  grid-template-rows: 60px 1fr 40px;
+}
+
+/* Header */
+header {
+  grid-column: 1 / -1;
+  background: var(--surface);
+  border-bottom: var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  justify-content: space-between;
+}
+
+.logo {
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: -1px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo span {
+  background: var(--accent);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.system-status {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+/* Sidebar Controls */
+aside {
+  background: var(--surface);
+  border-right: var(--border);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  overflow-y: auto;
+}
+
+/* Main Visualization View */
+main {
+  position: relative;
+  background: radial-gradient(circle at center, #151a2e 0%, #07080e 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+canvas {
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.viewport-overlay {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: rgba(0,0,0,0.4);
+  backdrop-filter: blur(10px);
+  padding: 12px;
+  border-radius: 8px;
+  border: var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  pointer-events: none;
+}
+
+/* Footer Info Bar */
+footer {
+  grid-column: 1 / -1;
+  background: var(--surface);
+  border-top: var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  justify-content: space-between;
+}
+
+.footer-pill {
+  display: flex;
+  gap: 12px;
+}
+
+.footer-pill span {
+  background: var(--surface-light);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.cursor-hint {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: rgba(0,0,0,0.6);
+  padding: 8px 16px;
+  border-radius: 20px;
+  pointer-events: none;
+}
+
+/* Tweakpane overrides to match theme */
+:root {
+  --tp-base-background-color: transparent;
+  --tp-base-shadow-color: transparent;
+  --tp-button-background-color: var(--surface-light);
+  --tp-button-background-color-active: var(--accent);
+  --tp-button-background-color-focus: var(--surface-light);
+  --tp-button-background-color-hover: var(--surface-light);
+  --tp-button-foreground-color: var(--text-primary);
+  --tp-container-background-color: transparent;
+  --tp-container-background-color-active: transparent;
+  --tp-container-background-color-focus: transparent;
+  --tp-container-background-color-hover: transparent;
+  --tp-container-foreground-color: var(--text-primary);
+  --tp-groove-foreground-color: var(--surface-light);
+  --tp-input-background-color: var(--surface-light);
+  --tp-input-background-color-active: var(--surface-light);
+  --tp-input-background-color-focus: var(--surface-light);
+  --tp-input-background-color-hover: var(--surface-light);
+  --tp-input-foreground-color: var(--text-primary);
+  --tp-label-foreground-color: var(--text-secondary);
+  --tp-monitor-background-color: var(--surface-light);
+  --tp-monitor-foreground-color: var(--text-primary);
+}
+
 
 :root {
   --bg: #07080e;
