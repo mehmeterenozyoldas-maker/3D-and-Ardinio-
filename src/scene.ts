@@ -155,6 +155,39 @@ const palette = Fn(
 
 const fbmNoise = makeFBM(simplexNoise);
 
+export const makeRidgedFBM = (
+  noiseFn: (p: any) => any,
+  { octaves = 6, lacunarity = 2.0, gain = 0.5 }: FBMOptions = {},
+) =>
+  Fn(([p]: [any]) => {
+    const value = float(0).toVar();
+    const amplitude = float(0.5).toVar();
+    const pos = vec3(p).toVar();
+
+    Loop(octaves, () => {
+      // Simplex returns [0, 1]. Convert to [-1, 1]
+      const n = noiseFn(pos).mul(2.0).sub(1.0);
+      const ridge = float(1.0).sub(abs(n));
+      value.addAssign(ridge.mul(ridge).mul(amplitude));
+      
+      pos.mulAssign(lacunarity);
+      amplitude.mulAssign(gain);
+    });
+
+    return value;
+  });
+
+const ridgedNoise = makeRidgedFBM(simplexNoise);
+
+const domainWarpNoise = Fn(([p]: [any]) => {
+  const offset = vec3(
+    fbmNoise(vec3(p).add(vec3(0.0, 0.0, 0.0))),
+    fbmNoise(vec3(p).add(vec3(5.2, 1.3, 2.8))),
+    float(0.0)
+  );
+  return fbmNoise(vec3(p).add(offset.mul(3.0)));
+});
+
 export async function initScene(canvas: HTMLCanvasElement, paneContainer: HTMLElement) {
   if (!navigator.gpu) {
     throw new Error("WebGPU not supported");
@@ -201,7 +234,7 @@ export async function initScene(canvas: HTMLCanvasElement, paneContainer: HTMLEl
     fogDensity: 0.04,
     animating: false,
     cameraControls: false,
-    noiseType: "simplex" as "simplex" | "fbm",
+    noiseType: "simplex" as "simplex" | "fbm" | "ridged" | "warp",
   };
 
   const fieldRadiusU = uniform(options.fieldRadius);
@@ -254,7 +287,13 @@ export async function initScene(canvas: HTMLCanvasElement, paneContainer: HTMLEl
         noiseOffsetYU,
         nz.mul(fieldRadiusU).mul(noiseScaleU).mul(0.65).add(noiseOffsetZU),
       ).toVar();
-      const noiseFn = options.noiseType === "fbm" ? fbmNoise : simplexNoise;
+      
+      let noiseFn: any;
+      if (options.noiseType === "fbm") noiseFn = fbmNoise;
+      else if (options.noiseType === "ridged") noiseFn = ridgedNoise;
+      else if (options.noiseType === "warp") noiseFn = domainWarpNoise;
+      else noiseFn = simplexNoise;
+
       const n = noiseFn(noiseIn.mul(0.5)).pow(2);
 
       heightStorage
@@ -458,7 +497,7 @@ export async function initScene(canvas: HTMLCanvasElement, paneContainer: HTMLEl
   });
   f.addBinding(options, "noiseType", {
     label: "Noise",
-    options: { Simplex: "simplex", FBM: "fbm" },
+    options: { Simplex: "simplex", FBM: "fbm", Ridged: "ridged", "Domain Warp": "warp" },
   }).on("change", () => {
     computeNode = buildComputeNode(COUNT);
   });
@@ -503,7 +542,99 @@ export async function initScene(canvas: HTMLCanvasElement, paneContainer: HTMLEl
 
   let serialWriter: any = null;
 
+  const hapticOptions = {
+    mode: "single" as "single" | "quadrant" | "grid9",
+    manualOverride: false,
+    manualIntensity: 0.5,
+    minPWM: 0,
+    maxPWM: 255,
+    accelRate: 0.2,
+    decelRate: 0.2
+  };
+
   const hardwareFolder = pane.addFolder({ title: "Hardware Integration" });
+  hardwareFolder.addBinding(hapticOptions, "mode", {
+    label: "Motor Setup",
+    options: { "Single Motor": "single", "4-Zone (N/S/E/W)": "quadrant", "9-Zone Grid (3x3)": "grid9" }
+  }).on("change", () => {
+    updateIndicatorsLayout();
+  });
+
+  const hapticCalib = hardwareFolder.addFolder({ title: "Calibration", expanded: false });
+  hapticCalib.addBinding(hapticOptions, "minPWM", { label: "Min PWM", min: 0, max: 255, step: 1 });
+  hapticCalib.addBinding(hapticOptions, "maxPWM", { label: "Max PWM", min: 0, max: 255, step: 1 });
+  hapticCalib.addBinding(hapticOptions, "accelRate", { label: "Acceleration", min: 0.01, max: 1.0, step: 0.01 });
+  hapticCalib.addBinding(hapticOptions, "decelRate", { label: "Deceleration", min: 0.01, max: 1.0, step: 0.01 });
+
+  hapticCalib.addButton({ title: "Save Config" }).on("click", () => {
+    localStorage.setItem("pylonHapticConfig", JSON.stringify(hapticOptions));
+  });
+  hapticCalib.addButton({ title: "Load Config" }).on("click", () => {
+    const saved = localStorage.getItem("pylonHapticConfig");
+    if (saved) {
+      Object.assign(hapticOptions, JSON.parse(saved));
+      pane.refresh();
+      updateIndicatorsLayout();
+    }
+  });
+
+  hardwareFolder.addButton({ title: "Setup BOM/Code" }).on("click", () => {
+    window.dispatchEvent(new Event('open-hardware-modal'));
+  });
+
+  hardwareFolder.addBinding(hapticOptions, "manualOverride", { label: "Manual Override" });
+  hardwareFolder.addBinding(hapticOptions, "manualIntensity", { label: "Intensity", min: 0, max: 1, step: 0.01 });
+
+  // Setup Visual Indicators for Haptics on the 3D Canvas
+  const indicatorGeo = new THREE.SphereGeometry(0.5, 32, 32);
+  const indicatorMat = new THREE.MeshBasicMaterial({ color: 0x5e6df7, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending });
+  
+  const maxMotors = 9;
+  const indicators: THREE.Mesh[] = [];
+  for (let i = 0; i < maxMotors; i++) {
+    const mesh = new THREE.Mesh(indicatorGeo, indicatorMat.clone());
+    scene.add(mesh);
+    indicators.push(mesh);
+  }
+
+  let activeMotors: { id: number, x: number, z: number }[] = [];
+  let motorStates = new Array(maxMotors).fill(0);
+
+  function updateIndicatorsLayout() {
+    const r = options.fieldRadius * 0.5;
+    const h = options.maxHeight + 1.5;
+    
+    indicators.forEach(ind => ind.visible = false);
+    
+    if (hapticOptions.mode === "single") {
+      activeMotors = [{ id: 0, x: 0, z: 0 }];
+    } else if (hapticOptions.mode === "quadrant") {
+      activeMotors = [
+        { id: 0, x: 0, z: -1 }, // N
+        { id: 1, x: 0, z: 1 },  // S
+        { id: 2, x: 1, z: 0 },  // E
+        { id: 3, x: -1, z: 0 }  // W
+      ];
+    } else if (hapticOptions.mode === "grid9") {
+      activeMotors = [];
+      let id = 0;
+      for (let z = -1; z <= 1; z++) {
+        for (let x = -1; x <= 1; x++) {
+          activeMotors.push({ id: id++, x, z });
+        }
+      }
+    }
+
+    activeMotors.forEach(m => {
+      const ind = indicators[m.id];
+      ind.position.set(m.x * r, h, m.z * r);
+      ind.visible = true;
+    });
+  }
+  updateIndicatorsLayout();
+  hardwareFolder.on("change", updateIndicatorsLayout);
+  f.on("change", updateIndicatorsLayout);
+
   hardwareFolder.addButton({ title: "Connect Arduino" }).on("click", async () => {
     try {
       const nav = navigator as any;
@@ -537,11 +668,64 @@ export async function initScene(canvas: HTMLCanvasElement, paneContainer: HTMLEl
       noiseOffsetZU.value -= velY;
     }
 
+    const getPulse = (x: number, z: number) => {
+      return Math.max(0, (Math.sin((x * 2.0 + noiseOffsetXU.value * 4.0)) + Math.cos((z * 2.0 + noiseOffsetZU.value * 4.0))) * 0.25 + 0.5);
+    };
+
+    const mapPWM = (val: number) => {
+       const mapped = hapticOptions.minPWM + val * (hapticOptions.maxPWM - hapticOptions.minPWM);
+       return Math.max(0, Math.min(254, Math.floor(mapped))); 
+    };
+
+    const packet: number[] = [];
+    if (hapticOptions.mode !== "single") {
+       packet.push(255); // Sync byte
+    }
+
+    activeMotors.forEach(motor => {
+      let target = 0;
+      if (hapticOptions.manualOverride) {
+        target = hapticOptions.manualIntensity;
+      } else {
+        target = getPulse(motor.x, motor.z);
+      }
+
+      const current = motorStates[motor.id];
+      if (target > current) {
+         motorStates[motor.id] += (target - current) * hapticOptions.accelRate;
+      } else {
+         motorStates[motor.id] += (target - current) * hapticOptions.decelRate;
+      }
+      
+      const smoothedVal = motorStates[motor.id];
+
+      const scale = 1 + smoothedVal * 3;
+      indicators[motor.id].scale.set(scale, scale, scale);
+      (indicators[motor.id].material as any).opacity = Math.max(0, Math.min(1, smoothedVal));
+
+      if (hapticOptions.mode === "single") {
+         packet.push(Math.max(0, Math.min(255, Math.floor(hapticOptions.minPWM + smoothedVal * (hapticOptions.maxPWM - hapticOptions.minPWM)))));
+      } else {
+         packet.push(mapPWM(smoothedVal));
+      }
+    });
+
+    const statusOverlay = document.getElementById("motor-status-list");
+    if (statusOverlay) {
+        let html = '<div style="color: var(--accent); margin-bottom: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold;">Motor Output</div>';
+        if (hapticOptions.mode === "single") {
+           html += `<div style="display: flex; justify-content: space-between;"><span>MTR_0:</span> <span>${packet[0]} PWM</span></div>`;
+        } else {
+           activeMotors.forEach((motor, i) => {
+              html += `<div style="display: flex; justify-content: space-between; gap: 16px;"><span>MTR_${motor.id}:</span> <span>${packet[i+1]} PWM</span></div>`;
+           });
+        }
+        statusOverlay.innerHTML = html;
+        statusOverlay.style.display = 'block';
+    }
+
     if (serialWriter && now - lastSerialTime > 50) {
-      // Generate a vibration intensity (0.0 to 1.0) based on the noise field's movement
-      const pulse = (Math.sin(noiseOffsetYU.value * 4.0) + Math.cos(noiseOffsetXU.value * 4.0)) * 0.25 + 0.5;
-      const pwm = Math.max(0, Math.min(255, Math.floor(pulse * 255)));
-      serialWriter.write(new Uint8Array([pwm])).catch((err: any) => console.error("Write error:", err));
+      serialWriter.write(new Uint8Array(packet)).catch((err: any) => console.error("Write error:", err));
       lastSerialTime = now;
     }
 
